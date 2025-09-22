@@ -2,372 +2,109 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Macro Behavior Simulator — Visual Only (Educational)</title>
+<title>Recoil Macro Trainer (Educational)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  body{font-family:Inter,Segoe UI,Roboto,Arial;margin:12px;background:#0b1220;color:#e6eef8}
-  h1{margin:0 0 8px;font-size:18px}
-  .row{display:flex;gap:12px;align-items:flex-start}
-  canvas{background:#071020;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.6)}
-  .panel{width:360px;background:#071826;padding:12px;border-radius:8px}
-  label{display:block;margin:6px 0 2px;font-size:13px}
-  input,select{width:100%;padding:6px;border-radius:6px;border:1px solid #163241;background:#071826;color:#e6eef8}
-  button{padding:8px 10px;margin-top:8px;border-radius:6px;border:none;background:#1f6feb;color:#fff;cursor:pointer}
-  .small{font-size:12px;color:#9fb3c8;margin-top:8px}
-  pre{background:#02121a;padding:8px;border-radius:6px;overflow:auto;height:120px}
+  body { margin:0; background:#0f1720; color:#e6eef8; font-family:sans-serif; display:flex; }
+  canvas { background:#16161b; margin:12px; border-radius:8px; }
+  #panel { margin:12px; padding:12px; background:#1e293b; border-radius:8px; width:280px; }
+  button { padding:8px 12px; margin-top:8px; display:block; }
 </style>
 </head>
 <body>
-  <h1>Macro Behavior Simulator — Visual Only (Educational)</h1>
-  <div class="row">
-    <canvas id="cv" width="1000" height="640"></canvas>
-
-    <div class="panel">
-      <div><strong>Simulation controls</strong></div>
-
-      <label>Recoil pattern (per-shot cumulative dx,dy)</label>
-      <select id="pattern">
-        <option value="simple_up">Simple upward (cumulative)</option>
-        <option value="diag_right">Diagonal-right drift</option>
-        <option value="zigzag">Zig-zag curve</option>
-      </select>
-
-      <label>Burst length (shots)</label>
-      <input id="burstLen" type="number" value="6" min="1" max="30" />
-
-      <label>Shot interval (ms) — how fast shots occur</label>
-      <input id="shotInterval" type="number" value="100" min="20" />
-
-      <label>Macro tick (base ms) — macro sends move every N ms</label>
-      <input id="baseTick" type="number" value="15" min="1" />
-
-      <label>Base pixel step (px per tick)</label>
-      <input id="basePx" type="number" value="2" min="0.1" step="0.1" />
-
-      <label>Timing jitter (±ms)</label>
-      <input id="timeJitter" type="number" value="4" min="0" />
-
-      <label>Pixel jitter (±px)</label>
-      <input id="pxJitter" type="number" value="1" min="0" step="0.1" />
-
-      <label>Repeat pattern randomly? <select id="varyMode"><option value="none">No</option><option value="per_shot">Vary per shot</option><option value="per_tick">Vary per tick</option></select></label>
-
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button id="holdBtn">Hold LMB (start sim)</button>
-        <button id="runBtn">Run single burst</button>
-      </div>
-
-      <div class="small">Important: This simulation only renders a virtual cursor and trace inside the page — it never moves your real mouse or interacts with external software. It's purely educational.</div>
-
-      <hr />
-      <div><strong>Last-run log (per-shot)</strong></div>
-      <pre id="log">No runs yet.</pre>
-
-      <div class="small">Use these parameters to experiment with small jitter vs large jitter and watch the traces. Observe repetition, spectral-ness (periodicity), and shot-alignment structure visually.</div>
-    </div>
-  </div>
-
+<canvas id="cv" width="800" height="600"></canvas>
+<div id="panel">
+  <h2>Recoil Macro Trainer</h2>
+  <p>Click inside canvas to fire. Hold <strong>LMB</strong>:</p>
+  <ul>
+    <li><strong>Macro Off</strong>: you control recoil with your mouse.</li>
+    <li><strong>Macro On</strong>: script auto-compensates recoil with slight randomness.</li>
+  </ul>
+  <button id="toggle">Macro: OFF</button>
+  <div id="status"></div>
+</div>
 <script>
-// --------------------- Simulation (visual-only) ---------------------
-// Utility
-function randUniform(min,max){ return Math.random()*(max-min)+min; }
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-
-// Patterns (cumulative recoil displacement after each shot)
-// Positive dy means upward displacement of aim (visual up), so compensator moves down (negative).
-const PATTERNS = {
-  simple_up: [ {x:0,y:4},{x:0,y:9},{x:0,y:14},{x:0,y:18},{x:0,y:20},{x:0,y:22} ],
-  diag_right: [ {x:0,y:3},{x:2,y:7},{x:4,y:11},{x:6,y:15},{x:7,y:18},{x:8,y:20} ],
-  zigzag: [ {x:0,y:3},{x:-2,y:6},{x:3,y:11},{x:-3,y:15},{x:2,y:19},{x:-1,y:22} ]
-};
-
-// Canvas init
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
 const W = cv.width, H = cv.height;
-const center = { x: W/2, y: H/2 };
+const center = {x: W/2, y: H/2};
 
-// UI refs
-const ui = {
-  pattern: document.getElementById('pattern'),
-  burstLen: document.getElementById('burstLen'),
-  shotInterval: document.getElementById('shotInterval'),
-  baseTick: document.getElementById('baseTick'),
-  basePx: document.getElementById('basePx'),
-  timeJitter: document.getElementById('timeJitter'),
-  pxJitter: document.getElementById('pxJitter'),
-  varyMode: document.getElementById('varyMode'),
-  holdBtn: document.getElementById('holdBtn'),
-  runBtn: document.getElementById('runBtn'),
-  log: document.getElementById('log')
+let macroEnabled = false;
+document.getElementById('toggle').onclick = () => {
+  macroEnabled = !macroEnabled;
+  document.getElementById('toggle').innerText = "Macro: " + (macroEnabled ? "ON" : "OFF");
 };
 
-let holding = false;
-ui.holdBtn.addEventListener('click', () => {
-  holding = !holding;
-  ui.holdBtn.textContent = holding ? 'Release LMB (stop)' : 'Hold LMB (start sim)';
-  if (holding) startSim(true); // continuous until release
+let mouseDown = false;
+let shots = [];
+let macroShots = [];
+let lastMouse = {...center};
+
+cv.addEventListener('mousedown', e => {
+  if (e.button===0) { mouseDown = true; runBurst(); }
+});
+window.addEventListener('mouseup', e => { if (e.button===0) mouseDown = false; });
+cv.addEventListener('mousemove', e => {
+  const r = cv.getBoundingClientRect();
+  lastMouse = {x:e.clientX-r.left, y:e.clientY-r.top};
 });
 
-ui.runBtn.addEventListener('click', () => { startSim(false); });
+// Example recoil pattern (y goes up each shot)
+const basePattern = [
+  {x:0,y:5},{x:1,y:10},{x:1,y:15},
+  {x:0,y:20},{x:-1,y:24},{x:0,y:28}
+];
 
-// draw baseline scene
-function drawBackground() {
+async function runBurst(){
+  shots = [];
+  macroShots = [];
+  const burstLen = basePattern.length;
+  for (let i=0;i<burstLen && mouseDown;i++){
+    if (!macroEnabled) {
+      // record player's mouse at shot time
+      shots.push({...lastMouse});
+    } else {
+      // scripted macro: center + compensating move
+      const ideal = basePattern[i];
+      // add randomness
+      const jitterX = (Math.random()*6-3); // ±3 px
+      const jitterY = (Math.random()*6-3);
+      macroShots.push({
+        x:center.x - ideal.x + jitterX,
+        y:center.y + ideal.y + jitterY
+      });
+    }
+    draw();
+    // wait ~100ms with jitter
+    const jitter = (Math.random()*20-10); // ±10 ms
+    await new Promise(r=>setTimeout(r,100+jitter));
+  }
+}
+
+function draw(){
   ctx.clearRect(0,0,W,H);
-  // background
-  ctx.fillStyle = '#03121a';
+  ctx.fillStyle = '#0f1724';
   ctx.fillRect(0,0,W,H);
-  // center crosshair
-  ctx.strokeStyle = '#9fc7ef';
-  ctx.lineWidth = 2;
+
+  // draw crosshair
+  ctx.strokeStyle = '#cbd5e1';
   ctx.beginPath();
-  ctx.moveTo(center.x-14, center.y); ctx.lineTo(center.x+14, center.y);
-  ctx.moveTo(center.x, center.y-14); ctx.lineTo(center.x, center.y+14);
+  ctx.moveTo(center.x-10, center.y); ctx.lineTo(center.x+10, center.y);
+  ctx.moveTo(center.x, center.y-10); ctx.lineTo(center.x, center.y+10);
   ctx.stroke();
-  ctx.fillStyle = '#9fc7ef';
-  ctx.font = '14px sans-serif';
-  ctx.fillText('Center (aim origin)', center.x + 18, center.y - 18);
-}
 
-// simulate a macro controller but only update a virtual cursor
-// does NOT touch real mouse or OS input
-async function startSim(userHoldMode) {
-  // read UI
-  const patternKey = ui.pattern.value;
-  const basePattern = PATTERNS[patternKey] || PATTERNS.simple_up;
-  const burstLen = Math.max(1, Math.min(30, parseInt(ui.burstLen.value) || 6));
-  const shotInterval = Math.max(20, parseInt(ui.shotInterval.value) || 100);
-  const baseTick = Math.max(1, parseInt(ui.baseTick.value) || 15);
-  const basePx = parseFloat(ui.basePx.value) || 2;
-  const timeJitter = Math.max(0, parseFloat(ui.timeJitter.value) || 0);
-  const pxJitter = Math.max(0, parseFloat(ui.pxJitter.value) || 0);
-  const varyMode = ui.varyMode.value;
-
-  // build shot-by-shot target recoil (cumulative) for burstLen shots
-  const pattern = [];
-  for (let i=0;i<burstLen;i++){
-    pattern.push(basePattern[i % basePattern.length]);
+  // player shots
+  ctx.fillStyle = '#7ee787';
+  for (const s of shots){
+    ctx.beginPath(); ctx.arc(s.x,s.y,5,0,Math.PI*2); ctx.fill();
   }
-  // compute cumulative recoil positions (target aim shift after each shot)
-  const cumulative = [];
-  let sx=0, sy=0;
-  for (let i=0;i<pattern.length;i++){
-    sx += pattern[i].x;
-    sy += pattern[i].y;
-    cumulative.push({x: sx, y: sy});
-  }
-
-  // simulation state: virtual cursor starts at center (we pretend player is initially centered)
-  let vCursor = { x: center.x, y: center.y }; // this is the "virtual cursor" macro moves
-  let humanCursor = { x: center.x, y: center.y }; // optional: show a simulated human for contrast
-  const traceMacro = []; // store macro cursor path for drawing
-  const traceHuman = []; // store human cursor (optional)
-  const shotLogs = []; // per-shot log entries
-
-  drawBackground();
-
-  // draw function
-  function renderFrame() {
-    drawBackground();
-    // draw ideal impact positions (where recoil would move the aim)
-    for (let i=0;i<cumulative.length;i++){
-      const r = cumulative[i];
-      ctx.strokeStyle = 'rgba(255,120,100,0.45)';
-      ctx.beginPath();
-      ctx.arc(center.x + r.x, center.y - r.y, 6, 0, Math.PI*2);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255,120,100,0.9)';
-      ctx.font = '12px monospace';
-      ctx.fillText((i+1).toString(), center.x + r.x + 8, center.y - r.y - 8);
-    }
-    // draw macro trace
-    ctx.beginPath();
-    for (let i=0;i<traceMacro.length;i++){
-      const p = traceMacro[i];
-      if (i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
-    }
-    ctx.strokeStyle = '#7ae1a6'; ctx.lineWidth = 2; ctx.stroke();
-    // draw human trace (if present)
-    ctx.beginPath();
-    for (let i=0;i<traceHuman.length;i++){
-      const p = traceHuman[i];
-      if (i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
-    }
-    ctx.strokeStyle = 'rgba(130,180,255,0.9)'; ctx.lineWidth = 1.6; ctx.stroke();
-
-    // draw current virtual cursor
-    ctx.fillStyle = '#00ff99';
-    ctx.beginPath(); ctx.arc(vCursor.x, vCursor.y, 6,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#bfe6ff';
-    ctx.beginPath(); ctx.arc(humanCursor.x, humanCursor.y, 4,0,Math.PI*2); ctx.fill();
-
-    // labels
-    ctx.fillStyle = '#9fb3c8';
-    ctx.font = '13px sans-serif';
-    ctx.fillText('Macro virtual cursor (green) — simulated only', 14, 22);
-    ctx.fillText('Human (blue) — optional contrast', 14, 40);
-  }
-
-  // helper: simulate one burst where shots occur at shotInterval
-  // macro works by applying small compensatory steps every baseTick ms; each tick we move vCursor by an amount close to basePx with pxJitter.
-  // We can vary timing per tick by adding timeJitter to baseTick if desired.
-  async function runBurst() {
-    traceMacro.length = 0;
-    traceHuman.length = 0;
-    shotLogs.length = 0;
-    vCursor = {x:center.x, y:center.y};
-    humanCursor = {x:center.x, y:center.y};
-
-    // For each shot, simulate:
-    //  - shot happens -> aim target moves by cumulative[shotIndex] (we mark impact)
-    //  - macro ticks continue during burst and apply compensating movement downward to bring vCursor toward center (i.e., opposite of recoil)
-    // We'll simulate on a timeline with two kinds of events: shot events (every shotInterval) and macro ticks (every baseTick +/- jitter).
-    const startT = performance.now();
-    let nextShotT = startT;
-    let shotIndex = 0;
-
-    // We'll run until we've processed all shots and given the macro some extra time to settle.
-    const endT = startT + shotInterval * (burstLen + 2);
-
-    let t = startT;
-    let nextTickT = startT + baseTick + randUniform(- (parseFloat(ui.timeJitter.value)||0), (parseFloat(ui.timeJitter.value)||0));
-
-    // Decide mode of randomness application:
-    // - varyMode 'none' => basePx constant per tick
-    // - 'per_shot' => choose a small random bias for pixel step at each shot to slightly alter shape
-    // - 'per_tick' => choose random jitter each tick (more random)
-    let perShotBias = 0;
-
-    while (t < endT) {
-      // process tick if it's time
-      if (t >= nextTickT) {
-        // decide px for this tick
-        let pxStep = parseFloat(ui.basePx.value) || 2;
-        if (ui.varyMode.value === 'per_shot') {
-          // small bias for this shot (kept until next shot)
-          // If shotIndex changed, pick new bias
-          // (we'll pick bias at shot time below)
-          pxStep += perShotBias;
-        } else if (ui.varyMode.value === 'per_tick') {
-          pxStep += randUniform(-parseFloat(ui.pxJitter.value), parseFloat(ui.pxJitter.value));
-        } else {
-          pxStep += 0;
-        }
-        // choose direction: macro compensates downward (negative y) and may add small x correction to counter lateral recoil
-        // We'll aim to reduce the current cumulative recoil for the next shot; compute small move vector toward center + compensation
-        // Calculate desired compensation per tick relative to current cumulative recoil for next upcoming shot
-        const targetRecoil = (shotIndex < cumulative.length) ? cumulative[shotIndex] : cumulative[cumulative.length-1];
-        // map desired compensatory vector (we want to move virtual cursor down by targetRecoil.y) but scaled to per-tick pxStep
-        // We'll compute a normalized direction from vCursor to desired compensative point:
-        const desiredX = center.x + targetRecoil.x;
-        const desiredY = center.y - targetRecoil.y;
-        const dirX = desiredX - vCursor.x;
-        const dirY = desiredY - vCursor.y;
-        const len = Math.hypot(dirX, dirY) || 1;
-        // move amount proportional to pxStep, plus some small deterministic portion toward center
-        const moveFactor = pxStep / len;
-        let moveX = dirX * moveFactor;
-        let moveY = dirY * moveFactor;
-        // but the macro is designed to move opposite recoil (pull down), so invert Y direction
-        moveY = -Math.sign(dirY) * Math.abs(moveY);
-        // Apply per-tick pixel jitter
-        const jitterPx = parseFloat(ui.pxJitter.value) || 0;
-        moveX += randUniform(-jitterPx, jitterPx);
-        moveY += randUniform(-jitterPx, jitterPx);
-
-        // Optionally clamp to reasonable steps
-        moveX = clamp(moveX, -20, 20);
-        moveY = clamp(moveY, -20, 20);
-
-        // Update virtual cursor
-        vCursor.x = vCursor.x + moveX;
-        vCursor.y = vCursor.y + moveY;
-        traceMacro.push({x: vCursor.x, y: vCursor.y, t: t - startT});
-
-        // also move a simulated 'human' cursor slower and noisier for contrast
-        const humanMoveX = randUniform(-1.2, 1.2);
-        const humanMoveY = randUniform(-1.2, 1.2);
-        humanCursor.x += humanMoveX;
-        humanCursor.y += humanMoveY;
-        traceHuman.push({x: humanCursor.x, y: humanCursor.y, t: t - startT});
-
-        // schedule next tick (baseTick +/- jitter)
-        nextTickT = t + baseTick + randUniform(-timeJitter, timeJitter);
-      }
-
-      // process shot if it's time
-      if (t >= nextShotT && shotIndex < burstLen) {
-        // a shot occurs: record current vCursor and humanCursor positions and the simulated recoil impact location
-        const recoilPos = cumulative[shotIndex];
-        const impactX = center.x + recoilPos.x;
-        const impactY = center.y - recoilPos.y;
-        shotLogs.push({
-          shot: shotIndex+1,
-          time: Math.round(t - startT),
-          virtualCursor: {x: Math.round(vCursor.x), y: Math.round(vCursor.y)},
-          impact: {x: Math.round(impactX), y: Math.round(impactY)},
-          dx: Math.round(vCursor.x - impactX),
-          dy: Math.round(vCursor.y - impactY)
-        });
-        // If varyMode == per_shot, set a new small bias for subsequent ticks
-        if (ui.varyMode.value === 'per_shot') {
-          perShotBias = randUniform(-parseFloat(ui.pxJitter.value), parseFloat(ui.pxJitter.value));
-        }
-        shotIndex++;
-        nextShotT += shotInterval;
-      }
-
-      // advance time
-      // To avoid busy-waiting let's await a small promise to allow animations and keep UI responsive
-      await new Promise(res => setTimeout(res, 0));
-      t = performance.now();
-
-      // If in userHoldMode and the holding flag has been cleared (release), break early
-      if (userHoldMode && !holding) break;
-    } // end while timeline
-
-    // done: render final traces and write log
-    renderFrame();
-    // draw impact markers
-    for (const s of shotLogs) {
-      ctx.strokeStyle = 'rgba(255,200,100,0.95)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(s.impact.x, s.impact.y, 7, 0, Math.PI*2);
-      ctx.stroke();
-      ctx.fillStyle = '#ffe9c2';
-      ctx.font = '12px monospace';
-      ctx.fillText(s.shot.toString(), s.impact.x + 8, s.impact.y - 8);
-    }
-    // draw labels for each logged shot's virtual cursor
-    for (const s of shotLogs) {
-      ctx.fillStyle = '#00ff99';
-      ctx.beginPath(); ctx.arc(s.virtualCursor.x, s.virtualCursor.y, 4,0,Math.PI*2); ctx.fill();
-    }
-
-    // update textual log for user
-    ui.log.textContent = shotLogs.map(s => {
-      return `Shot ${s.shot}: t=${s.time}ms  impact=( ${s.impact.x},${s.impact.y} )  virt=( ${s.virtualCursor.x},${s.virtualCursor.y} )  delta=( ${s.dx}, ${s.dy} )`;
-    }).join('\n');
-
-    return {traceMacro, traceHuman, shotLogs};
-  } // end runBurst
-
-  // If userHoldMode, run bursts repeatedly until holding false
-  if (userHoldMode) {
-    while (holding) {
-      await runBurst();
-      // small pause between bursts
-      await new Promise(res => setTimeout(res, 120));
-      // Allow UI digest
-    }
-  } else {
-    await runBurst();
+  // macro shots
+  ctx.fillStyle = '#ff7b7b';
+  for (const s of macroShots){
+    ctx.beginPath(); ctx.arc(s.x,s.y,5,0,Math.PI*2); ctx.fill();
   }
 }
-
-// initial draw
-drawBackground();
+draw();
 </script>
 </body>
 </html>
