@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Human vs Macro Recoil Demo</title>
+<title>Human vs Macro Randomized Demo</title>
 <style>
 body { font-family:sans-serif; margin:0; display:flex; flex-direction:column; align-items:center; background:#081520; color:#eee; }
 canvas{background:#0f1724; margin-top:12px; border-radius:8px;}
@@ -10,7 +10,7 @@ button{margin:12px;padding:8px 12px; border:none;border-radius:6px;background:#1
 </style>
 </head>
 <body>
-<h2>Human vs Macro Recoil Simulation (Visual Only)</h2>
+<h2>Human vs Macro Randomized Recoil Simulation</h2>
 <button onclick="runSimulation()">Run Simulation</button>
 <canvas id="cv" width="1000" height="400"></canvas>
 
@@ -30,62 +30,49 @@ function runSimulation(){
   let y = 0;
   for(let i=0;i<shots;i++){
     const dy = 4 + Math.random()*2; // upward step
-    const dx = (Math.random()*4-2); // wobble, unused for plot
     y -= dy; // negative = upward
     recoil.push(y);
   }
 
   // generate human compensation (imperfect)
   for(let i=0;i<shots;i++){
-    // human tries to compensate previous recoil, but sometimes overshoots/undershoots
     const prev = human[i-1]||0;
     const error = (Math.random()*4 - 2); // random ±2 px
     human.push(prev - (recoil[i]- (recoil[i-1]||0)) + error);
   }
 
-  // generate macro compensation (more precise, small jitter)
+  // generate macro compensation (human-like randomness)
   for(let i=0;i<shots;i++){
     const prev = macro[i-1]||0;
-    const jitter = (Math.random()*1.5 - 0.75); // ±0.75 px
-    macro.push(prev - (recoil[i]- (recoil[i-1]||0)) + jitter);
+    // instead of tiny jitter, allow small randomized deviations per shot
+    const baseComp = -(recoil[i]- (recoil[i-1]||0));
+    const jitter = randRange(-1.5,1.5);   // small pixel randomness
+    const overshoot = (Math.random()<0.1 ? randRange(-2,2) : 0); // occasional error ~10% shots
+    macro.push(prev + baseComp + jitter + overshoot);
   }
 
   // draw
   ctx.lineWidth=2;
-  // draw recoil (gray)
-  ctx.strokeStyle='#888';
-  ctx.beginPath();
-  for(let i=0;i<shots;i++){
-    const x = i*(W/shots);
-    const yPos = H/2 + recoil[i];
-    if(i===0) ctx.moveTo(x,yPos); else ctx.lineTo(x,yPos);
-  }
-  ctx.stroke();
+  drawCurve(recoil,'#888'); // gray recoil
+  drawCurve(human,'#7ee787'); // green human
+  drawCurve(macro,'#ff7b7b'); // red randomized macro
 
-  // draw human (green)
-  ctx.strokeStyle='#7ee787';
-  ctx.beginPath();
-  for(let i=0;i<shots;i++){
-    const x = i*(W/shots);
-    const yPos = H/2 + recoil[i] + human[i];
-    if(i===0) ctx.moveTo(x,yPos); else ctx.lineTo(x,yPos);
-  }
-  ctx.stroke();
-
-  // draw macro (red)
-  ctx.strokeStyle='#ff7b7b';
-  ctx.beginPath();
-  for(let i=0;i<shots;i++){
-    const x = i*(W/shots);
-    const yPos = H/2 + recoil[i] + macro[i];
-    if(i===0) ctx.moveTo(x,yPos); else ctx.lineTo(x,yPos);
-  }
-  ctx.stroke();
-
-  // labels
   ctx.fillStyle='#eee';
-  ctx.fillText('Gray: recoil, Green: human, Red: macro', 10,20);
+  ctx.fillText('Gray: recoil, Green: human, Red: macro (human-like randomized)', 10,20);
 }
+
+function drawCurve(arr,color){
+  ctx.strokeStyle=color;
+  ctx.beginPath();
+  for(let i=0;i<arr.length;i++){
+    const x = i*(W/arr.length);
+    const yPos = H/2 + arr[i];
+    if(i===0) ctx.moveTo(x,yPos); else ctx.lineTo(x,yPos);
+  }
+  ctx.stroke();
+}
+
+function randRange(min,max){ return Math.random()*(max-min)+min; }
 </script>
 </body>
 </html>
